@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>구간 반복</title>
+<style>
+  :root { --bg:#f6f5f2; --card:#fff; --ink:#1d1d1f; --sub:#6b6b70; --line:#e3e1dc; --accent:#2f6fde; --accent-ink:#fff; --soft:#eef3fd; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#141416; --card:#1f1f23; --ink:#ececee; --sub:#9a9aa2; --line:#33333a; --accent:#6c9cff; --accent-ink:#0d1220; --soft:#1e2740; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 -apple-system, "Pretendard", "Noto Sans KR", system-ui, sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:12px 16px 40px; }
+  .player { position:relative; width:100%; aspect-ratio:16/9; background:#000; border-radius:12px; overflow:hidden; }
+  .player iframe, #yt { position:absolute; inset:0; width:100%; height:100%; }
+  .status { display:flex; justify-content:space-between; align-items:baseline; margin:12px 2px 8px; font-variant-numeric:tabular-nums; }
+  .status .range { font-weight:600; }
+  .status .count { color:var(--sub); font-size:14px; }
+  .bar { position:relative; height:8px; background:var(--line); border-radius:4px; margin:0 2px 14px; overflow:hidden; }
+  .bar i { position:absolute; top:0; bottom:0; left:0; width:0; background:var(--accent); }
+  .row { display:grid; gap:8px; margin-bottom:8px; }
+  .r3 { grid-template-columns:repeat(3,1fr); }
+  .r2 { grid-template-columns:repeat(2,1fr); }
+  button { appearance:none; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:10px; padding:14px 6px; font:inherit; font-size:15px; cursor:pointer; touch-action:manipulation; }
+  button.main { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:600; }
+  button.on { background:var(--soft); border-color:var(--accent); color:var(--accent); font-weight:600; }
+  h2 { font-size:14px; color:var(--sub); font-weight:600; margin:18px 2px 8px; }
+  .chunks { list-style:none; margin:0; padding:0; display:grid; gap:6px; }
+  .chunks li { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .chunks b { display:block; }
+  .chunks span { color:var(--sub); font-size:14px; }
+  details { margin-top:18px; }
+  summary { color:var(--sub); font-size:14px; cursor:pointer; }
+  .edit { display:grid; gap:8px; margin-top:10px; }
+  .edit input { width:100%; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--ink); font:inherit; }
+  .hint { color:var(--sub); font-size:13px; margin:6px 2px 0; }
+</style>
+</head>
+<body>
+<main>
+  <div class="player"><div id="yt"></div></div>
+
+  <div class="status">
+    <span class="range" id="range">-</span>
+    <span class="count" id="count">반복 0회</span>
+  </div>
+  <div class="bar"><i id="prog"></i></div>
+
+  <div class="row r3">
+    <button id="back5">⟲ 5초</button>
+    <button id="play" class="main">재생</button>
+    <button id="restart">구간 처음</button>
+  </div>
+  <div class="row r3" id="speeds">
+    <button data-r="0.75">0.75×</button>
+    <button data-r="0.9">0.9×</button>
+    <button data-r="1">1.0×</button>
+  </div>
+  <div class="row r2">
+    <button id="loop" class="on">구간 반복 켜짐</button>
+    <button id="cc">자막 켜기</button>
+  </div>
+
+  <h2 id="chunksTitle" hidden>들어 볼 덩어리</h2>
+  <ul class="chunks" id="chunks"></ul>
+
+  <details>
+    <summary>구간 바꾸기</summary>
+    <div class="edit">
+      <div class="row r2">
+        <button id="setA">지금을 시작으로</button>
+        <button id="setB">지금을 끝으로</button>
+      </div>
+      <input id="url" placeholder="유튜브 링크 또는 영상 ID" inputmode="url">
+      <div class="row r2">
+        <input id="a" placeholder="시작 (예: 1:28)">
+        <input id="b" placeholder="끝 (예: 3:55)">
+      </div>
+      <button id="apply" class="main">적용</button>
+      <p class="hint">적용하면 주소가 바뀝니다. 그 주소를 저장하면 같은 구간으로 다시 열립니다.</p>
+    </div>
+  </details>
+</main>
+
+<script>
+  const q = new URLSearchParams(location.search);
+  const toSec = s => { if (!s) return null; s = String(s).trim(); if (/^\d+(\.\d+)?$/.test(s)) return +s; const p = s.split(':').map(Number); return p.reduce((t, n) => t * 60 + n, 0); };
+  const fmt = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+  const idOf = v => { if (!v) return ''; const m = String(v).match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([\w-]{11})/); return m ? m[1] : String(v).trim(); };
+
+  let vid = idOf(q.get('v')) || '776k0Zr27A8';
+  let A = toSec(q.get('a')) ?? 0;
+  let B = toSec(q.get('b'));
+  let rate = +(q.get('r') || 1);
+  let loopOn = true, loops = 0, player, ccOn = false;
+
+  const $ = id => document.getElementById(id);
+  const chunks = (q.get('c') || '').split('|').map(x => x.trim()).filter(Boolean);
+  if (chunks.length) {
+    $('chunksTitle').hidden = false;
+    $('chunks').innerHTML = chunks.map(c => { const [en, ko] = c.split('='); return `<li><b>${esc(en)}</b>${ko ? `<span>${esc(ko)}</span>` : ''}</li>`; }).join('');
+  }
+  function esc(s) { return s.replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]); }
+
+  function showRange() { $('range').textContent = fmt(A) + ' ~ ' + (B != null ? fmt(B) : '끝'); }
+  function showSpeed() { document.querySelectorAll('#speeds button').forEach(b => b.classList.toggle('on', +b.dataset.r === rate)); }
+  showRange(); showSpeed();
+  $('url').value = vid; $('a').value = fmt(A); $('b').value = B != null ? fmt(B) : '';
+
+  const tag = document.createElement('script'); tag.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(tag);
+  window.onYouTubeIframeAPIReady = () => {
+    player = new YT.Player('yt', {
+      videoId: vid,
+      playerVars: { start: Math.floor(A), playsinline: 1, rel: 0, modestbranding: 1, cc_load_policy: 0 },
+      events: {
+        onReady: () => { player.setPlaybackRate(rate); setInterval(tick, 200); },
+        onStateChange: e => { $('play').textContent = e.data === YT.PlayerState.PLAYING ? '정지' : '재생'; }
+      }
+    });
+  };
+
+  function tick() {
+    if (!player || !player.getCurrentTime) return;
+    const t = player.getCurrentTime(), end = B ?? player.getDuration();
+    $('prog').style.width = Math.min(100, Math.max(0, (t - A) / Math.max(1, end - A) * 100)) + '%';
+    if (B != null && t >= B) {
+      if (loopOn) { loops++; $('count').textContent = '반복 ' + loops + '회'; player.seekTo(A, true); }
+      else player.pauseVideo();
+    }
+  }
+
+  $('play').onclick = () => { if (!player) return; const st = player.getPlayerState(); if (st === YT.PlayerState.PLAYING) player.pauseVideo(); else { const t = player.getCurrentTime(); if (t < A - 0.5 || (B != null && t >= B)) player.seekTo(A, true); player.playVideo(); } };
+  $('restart').onclick = () => { if (!player) return; player.seekTo(A, true); player.playVideo(); };
+  $('back5').onclick = () => { if (!player) return; player.seekTo(Math.max(A, player.getCurrentTime() - 5), true); };
+  document.querySelectorAll('#speeds button').forEach(b => b.onclick = () => { rate = +b.dataset.r; if (player) player.setPlaybackRate(rate); showSpeed(); });
+  $('loop').onclick = () => { loopOn = !loopOn; $('loop').textContent = loopOn ? '구간 반복 켜짐' : '구간 반복 꺼짐'; $('loop').classList.toggle('on', loopOn); };
+  $('cc').onclick = () => {
+    if (!player) return; ccOn = !ccOn;
+    try { if (ccOn) { player.loadModule('captions'); player.setOption('captions', 'track', { languageCode: 'en' }); } else player.unloadModule('captions'); } catch (e) {}
+    $('cc').textContent = ccOn ? '자막 끄기' : '자막 켜기'; $('cc').classList.toggle('on', ccOn);
+  };
+  $('setA').onclick = () => { if (player) { $('a').value = fmt(player.getCurrentTime()); } };
+  $('setB').onclick = () => { if (player) { $('b').value = fmt(player.getCurrentTime()); } };
+  $('apply').onclick = () => {
+    const p = new URLSearchParams(location.search);
+    p.set('v', idOf($('url').value) || vid);
+    p.set('a', $('a').value.trim() || '0:00');
+    if ($('b').value.trim()) p.set('b', $('b').value.trim()); else p.delete('b');
+    location.search = p.toString();
+  };
+</script>
+</body>
+</html>
